@@ -1,82 +1,40 @@
 #include <iostream>
-#include <iomanip> // for std::setprecision
-#include <sstream> // for std::stringstream
+#include <iomanip>
+#include <sstream>
 #include <bitset>
 #include <string.h>
 
 using namespace std;
 
-string float_to_binary(float num) {
-    // Przekształcenie liczby na wskaźnik na bajty
-    unsigned char* bytes = reinterpret_cast<unsigned char*>(&num);
-
-    // Pobranie reprezentacji binarnej bajtów
-    std::bitset<sizeof(float) * 8> bits;
-    for (int i = 0; i < sizeof(float); ++i) {
-        for (int j = 0; j < 8; ++j) {
-            bits[i * 8 + j] = (bytes[i] >> (7 - j)) & 1;
-        }
-    }
-
-    // Zwrócenie reprezentacji binarnej jako ciągu znaków
-    return bits.to_string();
+string float_to_binary(float number) {
+    std::stringstream stream;
+    stream << std::bitset<sizeof(float) * 8>(*reinterpret_cast<unsigned int*>(&number));
+    return stream.str();
 }
 
+
 float binary_to_float(const std::string& binary) {
-    // Validate binary representation
-    for (char bit : binary) {
-        if (bit != '0' && bit != '1' && bit != '.') {
-            std::cerr << "Invalid binary representation." << std::endl;
-            return 0.0f;
-        }
-    }
-
-    // Find the position of the decimal point
-    size_t dotPosition = binary.find('.');
-
-    // Split into integer and fractional parts
-    std::string intPart = binary.substr(0, dotPosition);
-    std::string fracPart = binary.substr(dotPosition + 1);
-
-    // Convert integer part to int
-    int intResult = std::stoi(intPart, nullptr, 2);
-
-    // Convert fractional part to float
-    float fracResult = 0.0f;
-    float fraction = 0.5f;
-    for (char bit : fracPart) {
-        if (bit == '1') {
-            fracResult += fraction;
-        }
-        fraction *= 0.5f;
-    }
-
-    // Combine integer and fractional parts
-    float result = intResult + fracResult;
-
-    return result;
+    std::bitset<sizeof(float) * 8> bits(binary);
+    int num = static_cast<int>(bits.to_ulong());
+    int* numPtr = reinterpret_cast<int*>(&num);
+    return *reinterpret_cast<float*>(numPtr);
 }
 
 string float_to_hex(float number) {
-    // Use memcpy for type punning instead of reinterpret_cast
-    unsigned int ui;
-    memcpy(&ui, &number, sizeof(float));
-    stringstream ss;
-    ss << hex << ui;
-    return ss.str();
+    std::stringstream stream;
+    stream << std::hex << std::uppercase << *(reinterpret_cast<unsigned int*>(&number));
+    return stream.str();
 }
 
-float hex_to_float(const string& hex_string) {
-    // Convert hex string to unsigned int
-    unsigned int ui;
-    stringstream ss;
-    ss << hex << hex_string;
-    ss >> ui;
-
-    // Use memcpy for type punning instead of reinterpret_cast
-    float result;
-    memcpy(&result, &ui, sizeof(float));
-    return result;
+float hex_to_float(const std::string& hex_string) {
+    union {
+        float f;
+        unsigned int i;
+    } value;
+    std::stringstream ss;
+    ss << std::hex << hex_string;
+    ss >> value.i;
+    return value.f;
 }
 
 string calculate_bin(string a, string b, char op) {
@@ -96,6 +54,14 @@ string calculate_bin(string a, string b, char op) {
         "je multiplicationbin \n"
         "cmp $'/', %3 \n"       // If "/" jump to division
         "je divisionbin \n"
+        "cmp $'<', %3 \n"      // If "<<" jump to left shift
+        "je leftshiftbin \n"
+        "cmp $'>', %3 \n"      // If ">>" jump to right shift
+        "je rightshiftbin \n"
+        "cmp $'l', %3 \n"     // If "rol" jump to rotate left
+        "je rotateleftbin \n"
+        "cmp $'r', %3 \n"     // If "ror" jump to rotate right
+        "je rotaterightbin \n"
         "jmp endbin \n"            // Jump to end
 
         "additionbin: \n"
@@ -112,6 +78,30 @@ string calculate_bin(string a, string b, char op) {
 
         "divisionbin: \n"
         "divss %%xmm1, %%xmm0 \n" // Divide xmm0 by xmm1
+        "jmp endbin \n"            // Jump to end
+
+        "leftshiftbin: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "shl %%cl, %%eax \n"     // Shift eax left by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp endbin \n"            // Jump to end
+
+        "rightshiftbin: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "shr %%cl, %%eax \n"     // Shift eax right by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp endbin \n"            // Jump to end
+
+        "rotateleftbin: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "rol %%cl, %%eax \n"     // Rotate left eax by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp endbin \n"            // Jump to end
+
+        "rotaterightbin: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "ror %%cl, %%eax \n"     // Rotate right eax by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
         "jmp endbin \n"            // Jump to end
 
         "endbin: \n"
@@ -139,6 +129,14 @@ float calculate_dec(float x, float y, char op) {
         "je multiplication \n"
         "cmp $'/', %3 \n"       // If "/" jump to division
         "je division \n"
+        "cmp $'<', %3 \n"      // If "<<" jump to left shift
+        "je leftshift \n"
+        "cmp $'>', %3 \n"      // If ">>" jump to right shift
+        "je rightshift \n"
+        "cmp $'l', %3 \n"     // If "rol" jump to rotate left
+        "je rotateleft \n"
+        "cmp $'r', %3 \n"     // If "ror" jump to rotate right
+        "je rotateright \n"
         "jmp end \n"            // Jump to end
 
         "addition: \n"
@@ -155,6 +153,30 @@ float calculate_dec(float x, float y, char op) {
 
         "division: \n"
         "divss %%xmm1, %%xmm0 \n" // Divide xmm0 by xmm1
+        "jmp end \n"            // Jump to end
+
+        "leftshift: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "shl %%cl, %%eax \n"     // Shift eax left by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp end \n"            // Jump to end
+
+        "rightshift: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "shr %%cl, %%eax \n"     // Shift eax right by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp end \n"            // Jump to end
+
+        "rotateleft: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "rol %%cl, %%eax \n"     // Rotate left eax by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp end \n"            // Jump to end
+
+        "rotateright: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "ror %%cl, %%eax \n"     // Rotate right eax by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
         "jmp end \n"            // Jump to end
 
         "end: \n"
@@ -185,6 +207,14 @@ string calculate_hex(string a, string b, char op) {
         "je multiplicationhex \n"
         "cmp $'/', %3 \n"       // If "/" jump to division
         "je divisionhex \n"
+        "cmp $'<', %3 \n"      // If "<<" jump to left shift
+        "je leftshifthex \n"
+        "cmp $'>', %3 \n"      // If ">>" jump to right shift
+        "je rightshifthex \n"
+        "cmp $'l', %3 \n"     // If "rol" jump to rotate left
+        "je rotatelefthex \n"
+        "cmp $'r', %3 \n"     // If "ror" jump to rotate right
+        "je rotaterighthex \n"
         "jmp end \n"            // Jump to end
 
         "additionhex: \n"
@@ -201,6 +231,30 @@ string calculate_hex(string a, string b, char op) {
 
         "divisionhex: \n"
         "divss %%xmm1, %%xmm0 \n" // Divide xmm0 by xmm1
+        "jmp endhex \n"            // Jump to end
+
+        "leftshifthex: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "shl %%cl, %%eax \n"     // Shift eax left by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp endhex \n"            // Jump to end
+
+        "rightshifthex: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "shr %%cl, %%eax \n"     // Shift eax right by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp endhex \n"            // Jump to end
+
+        "rotatelefthex: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "rol %%cl, %%eax \n"     // Rotate left eax by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "jmp endhex \n"            // Jump to end
+
+        "rotaterighthex: \n"
+        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "ror %%cl, %%eax \n"     // Rotate right eax by the value in cl (y)
+        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
         "jmp endhex \n"            // Jump to end
 
         "endhex: \n"
@@ -220,9 +274,9 @@ int main() {
     char operation;
 
     float input_float = 3.14;
-    string input_binary = "0100010010010.000111011011";
-    string input_hex = "F.f";
-    
+    string input_binary = "010";
+    string input_hex = "F";
+
     if (0) {
         // Konwersja liczby zmiennoprzecinkowej na binarną i z powrotem
         cout << "Liczba zmiennoprzecinkowa: " << input_float << endl;
@@ -245,10 +299,10 @@ int main() {
 
     if (type == "bin") {
 
-        cout << "Chosen binary. Enter operation(+,-,*,/): ";
+        cout << "Chosen binary. Enter operation(+,-,*,/,>,<,l,r): ";
         cin >> str1 >> operation >> str2;
 
-        if (cin && (operation == '+' || operation == '-' || operation == '*' || operation == '/')) {
+        if (cin && (operation == '+' || operation == '-' || operation == '*' || operation == '/' || operation == '>' || operation == '<' || operation == 'l' || operation == 'r')) {
             cout << "Result: " << calculate_bin(str1, str2, operation) << "\n";
         }
         else {
@@ -258,10 +312,10 @@ int main() {
     }
     else if (type == "dec") {
 
-        cout << "Chosen decimal. Enter operation(+,-,*,/): ";
+        cout << "Chosen binary. Enter operation(+,-,*,/,>,<,l,r): ";
         cin >> num1 >> operation >> num2;
 
-        if (cin && (operation == '+' || operation == '-' || operation == '*' || operation == '/')) {
+        if (cin && (operation == '+' || operation == '-' || operation == '*' || operation == '/' || operation == '>' || operation == '<' || operation == 'l' || operation == 'r')) {
             float result = calculate_dec(num1, num2, operation);
             cout << "Result: " << setprecision(6) << result << "\n";
         }
@@ -272,10 +326,10 @@ int main() {
     }
     else if (type == "hex") {
 
-        cout << "Chosen hexadecimal. Enter operation(+,-,*,/): ";
+        cout << "Chosen binary. Enter operation(+,-,*,/,>,<,l,r): ";
         cin >> str1 >> operation >> str2;
 
-        if (cin && (operation == '+' || operation == '-' || operation == '*' || operation == '/') &&
+        if (cin && (operation == '+' || operation == '-' || operation == '*' || operation == '/' || operation == '>' || operation == '<' || operation == 'l' || operation == 'r') &&
             (str1.size() > 0) && (str2.size() > 0)) {
             cout << "Result: " << calculate_hex(str1, str2, operation) << "\n";
         }

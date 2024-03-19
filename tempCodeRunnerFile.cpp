@@ -1,1 +1,1 @@
-memcpy
+uint32_t
