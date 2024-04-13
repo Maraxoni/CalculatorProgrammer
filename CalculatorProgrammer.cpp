@@ -6,112 +6,80 @@
 
 using namespace std;
 
-string float_to_binary(float number) {
-    std::stringstream stream;
-    stream << std::bitset<sizeof(float) * 8>(*reinterpret_cast<unsigned int*>(&number));
-    return stream.str();
-}
-
-
-float binary_to_float(const std::string& binary) {
-    std::bitset<sizeof(float) * 8> bits(binary);
-    int num = static_cast<int>(bits.to_ulong());
-    int* numPtr = reinterpret_cast<int*>(&num);
-    return *reinterpret_cast<float*>(numPtr);
-}
-
-string float_to_hex(float number) {
-    std::stringstream stream;
-    stream << std::hex << std::uppercase << *(reinterpret_cast<unsigned int*>(&number));
-    return stream.str();
-}
-
-float hex_to_float(const std::string& hex_string) {
-    union {
-        float f;
-        unsigned int i;
-    } value;
-    std::stringstream ss;
-    ss << std::hex << hex_string;
-    ss >> value.i;
-    return value.f;
-}
-
 string calculate_bin(string a, string b, char op) {
-    float result;
-    float x = stof(a);
-    float y = stof(b);
+    int num1 = stoi(a, nullptr, 2);
+    int num2 = stoi(b, nullptr, 2);
+    int result;
 
     asm volatile (
-        "movss %1, %%xmm0 \n"   // Move value of x to xmm0
-        "movss %2, %%xmm1 \n"   // Move value of y to xmm1
-
-        "cmp $'+', %3 \n"       // If "+" jump to addition
-        "je additionbin \n"
-        "cmp $'-', %3 \n"       // If "-" jump to subtraction
-        "je subtractionbin \n"
-        "cmp $'*', %3 \n"       // If "*" jump to multiplication
-        "je multiplicationbin \n"
-        "cmp $'/', %3 \n"       // If "/" jump to division
-        "je divisionbin \n"
+        "mov %1, %%eax \n"   // Move num1 to eax
+        "mov %2, %%ebx \n"   // Move num2 to ebx
+        "xor %%edx, %%edx \n" // Clear edx for division
+        "cmp $'+', %3 \n"    // Compare op with '+'
+        "je addition_bin \n"
+        "cmp $'-', %3 \n"    // Compare op with '-'
+        "je subtraction_bin \n"
+        "cmp $'*', %3 \n"    // Compare op with '*'
+        "je multiplication_bin \n"
+        "cmp $'/', %3 \n"    // Compare op with '/'
+        "je division_bin \n"
         "cmp $'<', %3 \n"      // If "<<" jump to left shift
-        "je leftshiftbin \n"
+        "je leftshift_bin \n"
         "cmp $'>', %3 \n"      // If ">>" jump to right shift
-        "je rightshiftbin \n"
+        "je rightshift_bin \n"
         "cmp $'l', %3 \n"     // If "rol" jump to rotate left
-        "je rotateleftbin \n"
+        "je rotateleft_bin \n"
         "cmp $'r', %3 \n"     // If "ror" jump to rotate right
-        "je rotaterightbin \n"
-        "jmp endbin \n"            // Jump to end
+        "je rotateright_bin \n"
+        "jmp end_bin \n"            // Jump to end
 
-        "additionbin: \n"
-        "addss %%xmm1, %%xmm0 \n" // Add xmm1 to xmm0
-        "jmp endbin \n"            // Jump to end
+        "addition_bin: \n"
+        "add %%ebx, %%eax \n"  // Add ebx to eax
+        "jmp end_bin \n"       // Jump to end
 
-        "subtractionbin: \n"
-        "subss %%xmm1, %%xmm0 \n" // Subtract xmm1 from xmm0
-        "jmp endbin \n"            // Jump to end
+        "subtraction_bin: \n"
+        "sub %%ebx, %%eax \n"  // Subtract ebx from eax
+        "jmp end_bin \n"       // Jump to end
 
-        "multiplicationbin: \n"
-        "mulss %%xmm1, %%xmm0 \n" // Multiply xmm0 by xmm1
-        "jmp endbin \n"            // Jump to end
+        "multiplication_bin: \n"
+        "imul %%ebx, %%eax \n" // Multiply eax by ebx
+        "jmp end_bin \n"       // Jump to end
 
-        "divisionbin: \n"
-        "divss %%xmm1, %%xmm0 \n" // Divide xmm0 by xmm1
-        "jmp endbin \n"            // Jump to end
+        "division_bin: \n"
+        "idiv %%ebx \n"        // Divide eax by ebx
+        "mov %%eax, %0 \n"     // Move quotient to result
+        "jmp end_bin \n"       // Jump to end
 
-        "leftshiftbin: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
-        "shl %%cl, %%eax \n"     // Shift eax left by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
-        "jmp endbin \n"            // Jump to end
+        "rotateleft_bin: \n"
+        "rol %%cl, %%eax \n"   // Rotate left eax by the value in cl (num2)
+        "mov %%eax, %0 \n"     // Move result to output
+        "jmp end_bin \n"       // Jump to end
 
-        "rightshiftbin: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
-        "shr %%cl, %%eax \n"     // Shift eax right by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
-        "jmp endbin \n"            // Jump to end
+        "rotateright_bin: \n"
+        "ror %%cl, %%eax \n"   // Rotate right eax by the value in cl (num2)
+        "mov %%eax, %0 \n"     // Move result to output
+        "jmp end_bin \n"       // Jump to end
 
-        "rotateleftbin: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
-        "rol %%cl, %%eax \n"     // Rotate left eax by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
-        "jmp endbin \n"            // Jump to end
+        "leftshift_bin: \n"
+        "shl %%cl, %%eax \n"   // Left shift eax by the value in cl (num2)
+        "mov %%eax, %0 \n"     // Move result to output
+        "jmp end_bin \n"       // Jump to end
 
-        "rotaterightbin: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
-        "ror %%cl, %%eax \n"     // Rotate right eax by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
-        "jmp endbin \n"            // Jump to end
+        "rightshift_bin: \n"
+        "shr %%cl, %%eax \n"   // Right shift eax by the value in cl (num2)
+        "mov %%eax, %0 \n"     // Move result to output
+        "jmp end_bin \n"       // Jump to end
 
-        "endbin: \n"
-        "movss %%xmm0, %0 \n"   // Move output from xmm0 to result
-        : "=m" (result)         // Output - result
-        : "m" (x), "m" (y), "r" (op) // Input - x, y, op
-        : "xmm0", "xmm1"        // SSE registers xmm0 and xmm1 used in SSE instructions
-        );
+        "end_bin: \n"
+        "mov %%eax, %0 \n"     // Move result to output
+        : "=r" (result)        // Output - result
+        : "r" (num1), "r" (num2), "r" (op) // Input - num1, num2, op
+        : "eax", "ebx", "edx"  // Clobbered registers
+    );
 
-    return float_to_binary(result);
+    string bin_result = bitset<32>(result).to_string(); // Convert integer result to binary string
+    size_t first_one = bin_result.find('1'); // Find the index of the first '1'
+    return (first_one != string::npos) ? bin_result.substr(first_one) : "0"; // Trim leading zeros
 }
 
 float calculate_dec(float x, float y, char op) {
@@ -156,27 +124,19 @@ float calculate_dec(float x, float y, char op) {
         "jmp end \n"            // Jump to end
 
         "leftshift: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
-        "shl %%cl, %%eax \n"     // Shift eax left by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "shl $1, %%eax \n"     // Shift eax left by 1
         "jmp end \n"            // Jump to end
 
         "rightshift: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
-        "shr %%cl, %%eax \n"     // Shift eax right by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "shr $1, %%eax \n"     // Shift eax right by 1
         "jmp end \n"            // Jump to end
 
         "rotateleft: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
-        "rol %%cl, %%eax \n"     // Rotate left eax by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "rol $1, %%eax \n"     // Rotate left eax by 1
         "jmp end \n"            // Jump to end
 
         "rotateright: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
-        "ror %%cl, %%eax \n"     // Rotate right eax by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
+        "ror $1, %%eax \n"     // Rotate right eax by 1
         "jmp end \n"            // Jump to end
 
         "end: \n"
@@ -190,81 +150,75 @@ float calculate_dec(float x, float y, char op) {
 }
 
 string calculate_hex(string a, string b, char op) {
-    float result;
-
-    float x = hex_to_float(a);
-    float y = hex_to_float(b);
+    int num1 = stoi(a, nullptr, 16);
+    int num2 = stoi(b, nullptr, 16);
+    int result;
 
     asm volatile (
-        "movss %1, %%xmm0 \n"   // Move value of x to xmm0
-        "movss %2, %%xmm1 \n"   // Move value of y to xmm1
-
-        "cmp $'+', %3 \n"       // If "+" jump to addition
-        "je additionhex \n"
-        "cmp $'-', %3 \n"       // If "-" jump to subtraction
-        "je subtractionhex \n"
-        "cmp $'*', %3 \n"       // If "*" jump to multiplication
-        "je multiplicationhex \n"
-        "cmp $'/', %3 \n"       // If "/" jump to division
-        "je divisionhex \n"
+        "mov %1, %%eax \n"   // Move num1 to eax
+        "mov %2, %%ebx \n"   // Move num2 to ebx
+        "xor %%edx, %%edx \n" // Clear edx for division
+        "cmp $'+', %3 \n"    // Compare op with '+'
+        "je addition_hex \n"
+        "cmp $'-', %3 \n"    // Compare op with '-'
+        "je subtraction_hex \n"
+        "cmp $'*', %3 \n"    // Compare op with '*'
+        "je multiplication_hex \n"
+        "cmp $'/', %3 \n"    // Compare op with '/'
+        "je division_hex \n"
         "cmp $'<', %3 \n"      // If "<<" jump to left shift
-        "je leftshifthex \n"
+        "je leftshift_hex \n"
         "cmp $'>', %3 \n"      // If ">>" jump to right shift
-        "je rightshifthex \n"
+        "je rightshift_hex \n"
         "cmp $'l', %3 \n"     // If "rol" jump to rotate left
-        "je rotatelefthex \n"
+        "je rotateleft_hex \n"
         "cmp $'r', %3 \n"     // If "ror" jump to rotate right
-        "je rotaterighthex \n"
-        "jmp end \n"            // Jump to end
+        "je rotateright_hex \n"
+        "jmp end_hex \n"     // Jump to end
 
-        "additionhex: \n"
-        "addss %%xmm1, %%xmm0 \n" // Add xmm1 to xmm0
-        "jmp endhex \n"            // Jump to end
+        "addition_hex: \n"
+        "add %%ebx, %%eax \n"  // Add ebx to eax
+        "jmp end_hex \n"       // Jump to end
 
-        "subtractionhex: \n"
-        "subss %%xmm1, %%xmm0 \n" // Subtract xmm1 from xmm0
-        "jmp endhex \n"            // Jump to end
+        "subtraction_hex: \n"
+        "sub %%ebx, %%eax \n"  // Subtract ebx from eax
+        "jmp end_hex \n"       // Jump to end
 
-        "multiplicationhex: \n"
-        "mulss %%xmm1, %%xmm0 \n" // Multiply xmm0 by xmm1
-        "jmp endhex \n"            // Jump to end
+        "multiplication_hex: \n"
+        "imul %%ebx, %%eax \n" // Multiply eax by ebx
+        "jmp end_hex \n"       // Jump to end
 
-        "divisionhex: \n"
-        "divss %%xmm1, %%xmm0 \n" // Divide xmm0 by xmm1
-        "jmp endhex \n"            // Jump to end
+        "division_hex: \n"
+        "idiv %%ebx \n"        // Divide eax by ebx
+        "mov %%eax, %0 \n"     // Move quotient to result
+        "jmp end_hex \n"       // Jump to end
 
-        "leftshifthex: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "leftshift_hex: \n"
         "shl %%cl, %%eax \n"     // Shift eax left by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
-        "jmp endhex \n"            // Jump to end
+        "jmp end_hex \n"            // Jump to end
 
-        "rightshifthex: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "rightshift_hex: \n"
         "shr %%cl, %%eax \n"     // Shift eax right by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
-        "jmp endhex \n"            // Jump to end
+        "jmp end_hex \n"            // Jump to end
 
-        "rotatelefthex: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "rotateleft_hex: \n"
         "rol %%cl, %%eax \n"     // Rotate left eax by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
-        "jmp endhex \n"            // Jump to end
+        "jmp end_hex \n"            // Jump to end
 
-        "rotaterighthex: \n"
-        "movd %%xmm0, %%eax \n"  // Move the lower 32 bits of xmm0 to eax
+        "rotateright_hex: \n"
         "ror %%cl, %%eax \n"     // Rotate right eax by the value in cl (y)
-        "movd %%eax, %%xmm0 \n"  // Move eax back to xmm0
-        "jmp endhex \n"            // Jump to end
+        "jmp end_hex \n"            // Jump to end
 
-        "endhex: \n"
-        "movss %%xmm0, %0 \n"   // Move output from xmm0 to result
-        : "=m" (result)         // Output - result
-        : "m" (x), "m" (y), "r" (op) // Input - x, y, op
-        : "xmm0", "xmm1"        // SSE registers xmm0 and xmm1 used in SSE instructions
-        );
+        "end_hex: \n"
+        "mov %%eax, %0 \n"     // Move result to output
+        : "=r" (result)        // Output - result
+        : "r" (num1), "r" (num2), "r" (op) // Input - num1, num2, op
+        : "eax", "ebx", "edx"  // Clobbered registers
+    );
 
-    return float_to_hex(result);
+    stringstream ss;
+    ss << hex << uppercase << result; // Convert integer result back to hexadecimal string
+    return ss.str();
 }
 
 int main() {
@@ -272,27 +226,6 @@ int main() {
     string str1, str2;
     string type;
     char operation;
-
-    float input_float = 3.14;
-    string input_binary = "010";
-    string input_hex = "F";
-
-    if (0) {
-        // Konwersja liczby zmiennoprzecinkowej na binarną i z powrotem
-        cout << "Liczba zmiennoprzecinkowa: " << input_float << endl;
-        cout << "Reprezentacja binarna: " << float_to_binary(input_float) << endl;
-        cout << "Konwersja z powrotem: " << binary_to_float(float_to_binary(input_float)) << endl;
-
-        // Konwersja liczby binarnej na zmiennoprzecinkową i z powrotem
-        cout << "\nReprezentacja binarna: " << input_binary << endl;
-        cout << "Liczba zmiennoprzecinkowa: " << binary_to_float(input_binary) << endl;
-        cout << "Konwersja z powrotem: " << float_to_binary(binary_to_float(input_binary)) << endl;
-
-        // Konwersja liczby binarnej na zmiennoprzecinkową i z powrotem
-        cout << "\nReprezentacja heksadecymalna: " << input_hex << endl;
-        cout << "Liczba zmiennoprzecinkowa: " << hex_to_float(input_hex) << endl;
-        cout << "Konwersja z powrotem: " << float_to_hex(hex_to_float(input_hex)) << endl;
-    }
 
     cout << "Enter type (bin, dec, hex): ";
     cin >> type;
